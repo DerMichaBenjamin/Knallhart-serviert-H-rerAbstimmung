@@ -10,7 +10,7 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
   const [rankedIds, setRankedIds] = useState<string[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [dragState, setDragState] = useState<{ id: string; source: 'available' | 'ranked' } | null>(null);
+  const [dragState, setDragState] = useState<{ id: string } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const songMap = useMemo(() => Object.fromEntries(poll.songs.map((song) => [song.id, song])), [poll.songs]);
@@ -66,8 +66,8 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
     });
   }
 
-  function onDragStart(songId: string, source: 'available' | 'ranked') {
-    setDragState({ id: songId, source });
+  function onDragStart(songId: string) {
+    setDragState({ id: songId });
     setDropTarget(null);
   }
 
@@ -126,7 +126,7 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
       <section className="grid-2">
         <article className="card">
           <div className="card-body-lg stack-md">
-            <div className="grid-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <div className="grid-2 form-grid-2">
               <label className="field">
                 <span className="label">E-Mail-Adresse</span>
                 <input
@@ -157,18 +157,9 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
         <aside className="card">
           <div className="card-body-lg stack-md">
             <div className="grid-3">
-              <div className="kpi">
-                <span className="muted small">Verfügbare Songs</span>
-                <strong>{poll.songs.length}</strong>
-              </div>
-              <div className="kpi">
-                <span className="muted small">Ausgewählt</span>
-                <strong>{rankedIds.length} / {poll.rankingSize}</strong>
-              </div>
-              <div className="kpi">
-                <span className="muted small">Verteilte Punkte</span>
-                <strong>{totalPoints} / {maxTotalPoints}</strong>
-              </div>
+              <div className="kpi"><span className="muted small">Verfügbare Songs</span><strong>{poll.songs.length}</strong></div>
+              <div className="kpi"><span className="muted small">Ausgewählt</span><strong>{rankedIds.length} / {poll.rankingSize}</strong></div>
+              <div className="kpi"><span className="muted small">Verteilte Punkte</span><strong>{totalPoints} / {maxTotalPoints}</strong></div>
             </div>
             <div className="info-box small muted">
               Du kannst Songs per Drag-and-drop in die rechte Liste ziehen oder den Button „+“ benutzen. In der Top-Liste kannst du Songs per Drag-and-drop neu sortieren.
@@ -202,7 +193,7 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
                     key={song.id}
                     className={`song-card ${dragState?.id === song.id ? 'dragging' : ''}`}
                     draggable
-                    onDragStart={() => onDragStart(song.id, 'available')}
+                    onDragStart={() => onDragStart(song.id)}
                     onDragEnd={() => {
                       setDragState(null);
                       setDropTarget(null);
@@ -270,16 +261,13 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
                       <div
                         className={`song-card ${dragState?.id === song.id ? 'dragging' : ''}`}
                         draggable
-                        onDragStart={() => onDragStart(song.id, 'ranked')}
+                        onDragStart={() => onDragStart(song.id)}
                         onDragEnd={() => {
                           setDragState(null);
                           setDropTarget(null);
                         }}
                       >
-                        <div className="song-rank">
-                          <span>{index + 1}</span>
-                          <small>{poll.rankingSize - index} P</small>
-                        </div>
+                        <div className="song-rank">{index + 1}<small>{poll.rankingSize - index}P</small></div>
                         <div className="song-meta">
                           <div className="song-title">{song.title}</div>
                           <div className="song-artist">{song.artist}</div>
@@ -287,34 +275,19 @@ export function VotingApp({ poll }: { poll: PublicPoll }) {
                         <div className="song-actions">
                           <button type="button" className="icon-button" onClick={() => moveSong(song.id, -1)}>↑</button>
                           <button type="button" className="icon-button" onClick={() => moveSong(song.id, 1)}>↓</button>
-                          <button type="button" className="icon-button" onClick={() => removeSong(song.id)}>✕</button>
+                          <button type="button" className="icon-button" onClick={() => removeSong(song.id)}>×</button>
                         </div>
                       </div>
                     </div>
                   ))}
-                  <div
-                    className={`drop-slot ${dropTarget === 'after-last' ? 'over' : ''}`}
-                    style={{ minHeight: '20px' }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      setDropTarget('after-last');
-                    }}
-                    onDragLeave={() => setDropTarget(null)}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      onDropIntoRanked(rankedSongs.length);
-                    }}
-                  />
                 </div>
               )}
             </div>
 
             <div className="toolbar">
-              <span className="small muted">Nur mit genau {poll.rankingSize} Songs ist die Stimme gültig.</span>
+              <div className="small muted">Nur mit genau {poll.rankingSize} Songs ist die Abstimmung gültig.</div>
               <div className="inline">
-                <button type="button" className="button secondary" onClick={() => setRankedIds([])}>
-                  Zurücksetzen
-                </button>
+                <button type="button" className="button secondary" onClick={() => setRankedIds([])}>Zurücksetzen</button>
                 <button type="button" className="button" onClick={handleSubmit} disabled={submitting}>
                   {submitting ? 'Speichert ...' : 'Abstimmen'}
                 </button>

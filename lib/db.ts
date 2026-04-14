@@ -4,12 +4,13 @@ import type {
   AdminOverview,
   AdminResultsRow,
   PollRecord,
+  PollStatus,
   PublicPoll,
   SongRecord,
   VoteEntryRecord,
   VoteRecord,
 } from '@/lib/types';
-import { normalizeEmail, pointsForRank, slugify, splitSongLine } from '@/lib/utils';
+import { normalizeEmail, pointsForRank, resolvePollStatus, slugify, splitSongLine, toIsoOrNull } from '@/lib/utils';
 
 async function getSongsForPoll(pollId: string) {
   const supabase = createSupabaseAdmin();
@@ -21,6 +22,21 @@ async function getSongsForPoll(pollId: string) {
 
   if (error) throw error;
   return (data ?? []) as SongRecord[];
+}
+
+function mapToPublicPoll(poll: PollRecord, songs: SongRecord[]): PublicPoll {
+  return {
+    id: poll.id,
+    slug: poll.slug,
+    title: poll.title,
+    description: poll.description,
+    rankingSize: poll.ranking_size,
+    status: poll.status,
+    resolvedStatus: resolvePollStatus(poll),
+    startsAt: poll.starts_at,
+    endsAt: poll.ends_at,
+    songs: songs.map((song) => ({ id: song.id, title: song.title, artist: song.artist })),
+  };
 }
 
 export async function getActivePoll(): Promise<PublicPoll | null> {
@@ -37,14 +53,7 @@ export async function getActivePoll(): Promise<PublicPoll | null> {
   if (!data) return null;
 
   const songs = await getSongsForPoll(data.id);
-  return {
-    id: data.id,
-    slug: data.slug,
-    title: data.title,
-    description: data.description,
-    rankingSize: data.ranking_size,
-    songs: songs.map((song) => ({ id: song.id, title: song.title, artist: song.artist })),
-  };
+  return mapToPublicPoll(data as PollRecord, songs);
 }
 
 export async function getPollBySlug(slug: string): Promise<(PollRecord & { songs: SongRecord[] }) | null> {
@@ -70,8 +79,18 @@ export async function submitVote(input: {
   ranking: string[];
 }) {
   const poll = await getPollBySlug(input.pollSlug);
-  if (!poll || !poll.is_active) {
-    return { ok: false as const, status: 404, message: 'Aktive Abstimmung nicht gefunden.' };
+  if (!poll) {
+    return { ok: false as const, status: 404, message: 'Abstimmung nicht gefunden.' };
+  }
+
+  const resolvedStatus = resolvePollStatus(poll);
+  if (resolvedStatus !== 'live') {
+    const message = resolvedStatus === 'scheduled'
+      ? 'Diese Abstimmung hat noch nicht begonnen.'
+      : resolvedStatus === 'ended'
+      ? 'Diese Abstimmung ist bereits beendet.'
+      : 'Diese Abstimmung ist derzeit nicht freigegeben.';
+    return { ok: false as const, status: 409, message };
   }
 
   const ranking = input.ranking.map((id) => id.trim()).filter(Boolean);
@@ -134,6 +153,9 @@ export async function createPoll(input: {
   slug?: string;
   rankingSize?: number;
   songsText: string;
+  status?: PollStatus;
+  startsAt?: string | null;
+  endsAt?: string | null;
 }) {
   const rankingSize = input.rankingSize ?? DEFAULT_RANKING_SIZE;
   const parsedSongs = input.songsText
@@ -151,6 +173,14 @@ export async function createPoll(input: {
   const slug = input.slug?.trim() ? slugify(input.slug) : slugify(title);
   if (!slug) throw new Error('Slug konnte nicht erzeugt werden.');
 
+  const startsAt = toIsoOrNull(input.startsAt);
+  const endsAt = toIsoOrNull(input.endsAt);
+  if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) {
+    throw new Error('Das Enddatum muss nach dem Startdatum liegen.');
+  }
+
+  const status: PollStatus = input.status ?? 'live';
+
   const supabase = createSupabaseAdmin();
 
   await supabase.from('polls').update({ is_active: false }).eq('is_active', true);
@@ -163,6 +193,9 @@ export async function createPoll(input: {
       slug,
       ranking_size: rankingSize,
       is_active: true,
+      status,
+      starts_at: startsAt,
+      ends_at: endsAt,
     })
     .select('*')
     .single();
@@ -183,6 +216,74 @@ export async function createPoll(input: {
   }
 
   return poll as PollRecord;
+}
+
+export async function updateCurrentPoll(input: {
+  title: string;
+  description?: string;
+  status: PollStatus;
+  startsAt?: string | null;
+  endsAt?: string | null;
+}) {
+  const supabase = createSupabaseAdmin();
+  const { data: current, error: currentError } = await supabase
+    .from('polls')
+    .select('*')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (currentError) throw currentError;
+  if (!current) throw new Error('Keine aktuelle Runde gefunden.');
+
+  const startsAt = toIsoOrNull(input.startsAt);
+  const endsAt = toIsoOrNull(input.endsAt);
+  if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) {
+    throw new Error('Das Enddatum muss nach dem Startdatum liegen.');
+  }
+
+  const updates = {
+    title: input.title.trim(),
+    description: input.description?.trim() || null,
+    status: input.status,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase.from('polls').update(updates).eq('id', current.id).select('*').single();
+  if (error) throw error;
+  return data as PollRecord;
+}
+
+export async function setCurrentPollStatus(status: PollStatus) {
+  const supabase = createSupabaseAdmin();
+  const { data: current, error: currentError } = await supabase
+    .from('polls')
+    .select('*')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (currentError) throw currentError;
+  if (!current) throw new Error('Keine aktuelle Runde gefunden.');
+
+  const updates: Record<string, string | null> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+  if (status === 'live' && !current.starts_at) {
+    updates.starts_at = new Date().toISOString();
+  }
+  if (status === 'ended' && !current.ends_at) {
+    updates.ends_at = new Date().toISOString();
+  }
+
+  const { data, error } = await supabase.from('polls').update(updates).eq('id', current.id).select('*').single();
+  if (error) throw error;
+  return data as PollRecord;
 }
 
 export async function getAdminOverview(): Promise<AdminOverview> {
@@ -206,6 +307,10 @@ export async function getAdminOverview(): Promise<AdminOverview> {
         title: row.title,
         rankingSize: row.ranking_size,
         isActive: row.is_active,
+        status: row.status,
+        resolvedStatus: resolvePollStatus(row),
+        startsAt: row.starts_at,
+        endsAt: row.ends_at,
         createdAt: row.created_at,
       })),
       recentVotes: [],
@@ -259,10 +364,7 @@ export async function getAdminOverview(): Promise<AdminOverview> {
 
   for (const result of resultsBySong.values()) {
     if (result.appearances > 0) {
-      const weightedRankSum = result.rankBreakdown.reduce(
-        (sum, count, index) => sum + count * (index + 1),
-        0
-      );
+      const weightedRankSum = result.rankBreakdown.reduce((sum, count, index) => sum + count * (index + 1), 0);
       result.averageRank = Number((weightedRankSum / result.appearances).toFixed(2));
     }
   }
@@ -285,6 +387,10 @@ export async function getAdminOverview(): Promise<AdminOverview> {
       title: row.title,
       rankingSize: row.ranking_size,
       isActive: row.is_active,
+      status: row.status,
+      resolvedStatus: resolvePollStatus(row),
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
       createdAt: row.created_at,
     })),
     recentVotes: votes.slice(0, 20).map((vote) => ({

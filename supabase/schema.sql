@@ -7,7 +7,11 @@ create table if not exists public.polls (
   description text,
   ranking_size integer not null default 12 check (ranking_size > 0),
   is_active boolean not null default false,
-  created_at timestamptz not null default now()
+  status text not null default 'live' check (status in ('draft', 'scheduled', 'live', 'ended')),
+  starts_at timestamptz,
+  ends_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.songs (

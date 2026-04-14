@@ -1,16 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import type { AdminOverview } from '@/lib/types';
-import { formatDateTime } from '@/lib/utils';
+import { useEffect, useState } from 'react';
+import type { AdminOverview, PollStatus } from '@/lib/types';
+import { formatDateTime, formatForDateTimeInput, pollStatusLabel } from '@/lib/utils';
 
-export function AdminDashboard({ initialOverview }: { initialOverview: AdminOverview }) {
-  const [overview, setOverview] = useState(initialOverview);
-  const [title, setTitle] = useState('Neue Songs der Woche');
-  const [slug, setSlug] = useState('neue-songs-der-woche');
-  const [rankingSize, setRankingSize] = useState(String(overview.activePoll?.rankingSize ?? 12));
-  const [description, setDescription] = useState('Wähle deine Top 12 der Woche.');
-  const [songsText, setSongsText] = useState(`Ich könnte dich schöner saufen – Andreas Maintz
+const DEFAULT_SONGS = `Ich könnte dich schöner saufen – Andreas Maintz
 Bodenlos – Jenny Wendelberger
 Geld ist nur Papier – Minnie Rock
 Bierzelt Legende – Troglauer
@@ -61,9 +55,37 @@ Die Palme steht – Oliver Lemon, Peter Milski
 Lawinengefahr – Peter Rüssel
 Party Vulkan – Stefan Micha
 Nie nüchtern – Kaja - Kanone
-Schnaps an der Theke – DC#Mark`);
+Schnaps an der Theke – DC#Mark`;
+
+export function AdminDashboard({ initialOverview }: { initialOverview: AdminOverview }) {
+  const [overview, setOverview] = useState(initialOverview);
+  const [title, setTitle] = useState('Neue Songs der Woche');
+  const [slug, setSlug] = useState('neue-songs-der-woche');
+  const [rankingSize, setRankingSize] = useState(String(overview.activePoll?.rankingSize ?? 12));
+  const [description, setDescription] = useState('Wähle deine Top 12 der Woche.');
+  const [songsText, setSongsText] = useState(DEFAULT_SONGS);
+  const [newStatus, setNewStatus] = useState<PollStatus>('live');
+  const [newStartsAt, setNewStartsAt] = useState('');
+  const [newEndsAt, setNewEndsAt] = useState('');
+
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editStatus, setEditStatus] = useState<PollStatus>('live');
+  const [editStartsAt, setEditStartsAt] = useState('');
+  const [editEndsAt, setEditEndsAt] = useState('');
+
   const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [updatingCurrent, setUpdatingCurrent] = useState(false);
+
+  useEffect(() => {
+    if (!overview.activePoll) return;
+    setEditTitle(overview.activePoll.title);
+    setEditDescription(overview.activePoll.description || '');
+    setEditStatus(overview.activePoll.status);
+    setEditStartsAt(formatForDateTimeInput(overview.activePoll.startsAt));
+    setEditEndsAt(formatForDateTimeInput(overview.activePoll.endsAt));
+  }, [overview.activePoll]);
 
   async function refreshOverview() {
     const response = await fetch('/api/admin/results', { cache: 'no-store' });
@@ -89,6 +111,9 @@ Schnaps an der Theke – DC#Mark`);
           rankingSize: Number(rankingSize),
           description,
           songsText,
+          status: newStatus,
+          startsAt: newStartsAt || null,
+          endsAt: newEndsAt || null,
         }),
       });
       const result = await response.json();
@@ -97,12 +122,65 @@ Schnaps an der Theke – DC#Mark`);
         return;
       }
 
-      setStatus({ type: 'success', text: 'Neue Abstimmungsrunde wurde angelegt und aktiviert.' });
+      setStatus({ type: 'success', text: 'Neue Abstimmungsrunde wurde angelegt.' });
       await refreshOverview();
     } catch (error) {
       setStatus({ type: 'error', text: error instanceof Error ? error.message : 'Unbekannter Fehler.' });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleUpdateCurrent(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus(null);
+    setUpdatingCurrent(true);
+    try {
+      const response = await fetch('/api/admin/poll', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editTitle,
+          description: editDescription,
+          status: editStatus,
+          startsAt: editStartsAt || null,
+          endsAt: editEndsAt || null,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setStatus({ type: 'error', text: result.message || 'Aktuelle Runde konnte nicht aktualisiert werden.' });
+        return;
+      }
+      setStatus({ type: 'success', text: 'Aktuelle Runde wurde aktualisiert.' });
+      await refreshOverview();
+    } catch (error) {
+      setStatus({ type: 'error', text: error instanceof Error ? error.message : 'Unbekannter Fehler.' });
+    } finally {
+      setUpdatingCurrent(false);
+    }
+  }
+
+  async function handleStatusAction(nextStatus: PollStatus) {
+    setStatus(null);
+    setUpdatingCurrent(true);
+    try {
+      const response = await fetch('/api/admin/poll', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'setStatus', status: nextStatus }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setStatus({ type: 'error', text: result.message || 'Status konnte nicht geändert werden.' });
+        return;
+      }
+      setStatus({ type: 'success', text: `Runde ist jetzt ${pollStatusLabel(nextStatus).toLowerCase()}.` });
+      await refreshOverview();
+    } catch (error) {
+      setStatus({ type: 'error', text: error instanceof Error ? error.message : 'Unbekannter Fehler.' });
+    } finally {
+      setUpdatingCurrent(false);
     }
   }
 
@@ -113,47 +191,101 @@ Schnaps an der Theke – DC#Mark`);
 
   return (
     <main className="page-shell stack-lg">
-      <section className="toolbar">
-        <div className="stack-sm">
-          <span className="badge">Admin-Dashboard</span>
-          <h1 className="heading-xl">Release-Voting verwalten</h1>
-          <p className="muted">Hier legst du neue Runden an und siehst die laufenden Ergebnisse.</p>
+      <section className="toolbar hero-toolbar">
+        <div className="brand-inline">
+          <img src="/logo-knallhart-serviert.jpg" alt="Knallhart serviert" className="brand-logo brand-logo-small" />
+          <div className="stack-sm">
+            <span className="badge">Admin-Dashboard</span>
+            <h1 className="heading-xl">Release-Voting verwalten</h1>
+            <p className="muted">Hier legst du neue Runden an, planst Zeiträume, beendest Runden manuell und siehst die laufenden Ergebnisse.</p>
+          </div>
         </div>
         <div className="inline">
           {overview.activePoll ? (
-            <a className="button secondary" href="/api/admin/export">
-              CSV exportieren
-            </a>
+            <a className="button secondary" href="/api/admin/export">CSV exportieren</a>
           ) : null}
-          <button className="button secondary" type="button" onClick={handleLogout}>
-            Ausloggen
-          </button>
+          <button className="button secondary" type="button" onClick={handleLogout}>Ausloggen</button>
         </div>
       </section>
 
-      <section className="grid-3">
-        <div className="card"><div className="card-body-lg kpi"><span className="muted small">Aktive Runde</span><strong>{overview.activePoll?.title ?? '—'}</strong></div></div>
+      {status ? <div className={`alert ${status.type}`}>{status.text}</div> : null}
+
+      <section className="grid-4">
+        <div className="card"><div className="card-body-lg kpi"><span className="muted small">Aktuelle Runde</span><strong>{overview.activePoll?.title ?? '—'}</strong></div></div>
+        <div className="card"><div className="card-body-lg kpi"><span className="muted small">Status</span><strong>{overview.activePoll ? pollStatusLabel(overview.activePoll.resolvedStatus) : '—'}</strong></div></div>
         <div className="card"><div className="card-body-lg kpi"><span className="muted small">Abgegebene Stimmen</span><strong>{overview.voteCount}</strong></div></div>
-        <div className="card"><div className="card-body-lg kpi"><span className="muted small">Songs in aktiver Runde</span><strong>{overview.activePoll?.songs.length ?? 0}</strong></div></div>
+        <div className="card"><div className="card-body-lg kpi"><span className="muted small">Songs in aktueller Runde</span><strong>{overview.activePoll?.songs.length ?? 0}</strong></div></div>
       </section>
+
+      {overview.activePoll ? (
+        <section className="grid-2">
+          <article className="card">
+            <div className="card-body-lg stack-md">
+              <h2 className="heading-lg">Aktuelle Runde steuern</h2>
+              <p className="muted small">Titel, Beschreibung, Zeitraum und Status kannst du ändern. Die Songliste einer laufenden Runde wird bewusst nicht live bearbeitet, damit die Abstimmung fair bleibt.</p>
+              <form className="stack-md" onSubmit={handleUpdateCurrent}>
+                <label className="field">
+                  <span className="label">Titel</span>
+                  <input className="input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
+                </label>
+                <label className="field">
+                  <span className="label">Beschreibung</span>
+                  <input className="input" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                </label>
+                <div className="grid-3 compact-grid">
+                  <label className="field">
+                    <span className="label">Status</span>
+                    <select className="select" value={editStatus} onChange={(e) => setEditStatus(e.target.value as PollStatus)}>
+                      <option value="draft">Entwurf</option>
+                      <option value="scheduled">Geplant</option>
+                      <option value="live">Live</option>
+                      <option value="ended">Beendet</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span className="label">Start</span>
+                    <input className="input" type="datetime-local" value={editStartsAt} onChange={(e) => setEditStartsAt(e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span className="label">Ende</span>
+                    <input className="input" type="datetime-local" value={editEndsAt} onChange={(e) => setEditEndsAt(e.target.value)} />
+                  </label>
+                </div>
+                <div className="inline">
+                  <button className="button" type="submit" disabled={updatingCurrent}>{updatingCurrent ? 'Speichert ...' : 'Änderungen speichern'}</button>
+                  <button className="button secondary" type="button" disabled={updatingCurrent} onClick={() => handleStatusAction('live')}>Jetzt starten</button>
+                  <button className="button secondary" type="button" disabled={updatingCurrent} onClick={() => handleStatusAction('ended')}>Jetzt beenden</button>
+                </div>
+              </form>
+            </div>
+          </article>
+
+          <article className="card">
+            <div className="card-body-lg stack-md">
+              <h2 className="heading-lg">Aktuelle Zeitsteuerung</h2>
+              <div className="info-box stack-sm">
+                <div><strong>Status:</strong> {pollStatusLabel(overview.activePoll.resolvedStatus)}</div>
+                <div><strong>Start:</strong> {overview.activePoll.startsAt ? formatDateTime(overview.activePoll.startsAt) : 'nicht gesetzt'}</div>
+                <div><strong>Ende:</strong> {overview.activePoll.endsAt ? formatDateTime(overview.activePoll.endsAt) : 'nicht gesetzt'}</div>
+                <div><strong>Hinweis:</strong> Wenn Start oder Ende gesetzt sind, steuert die App die Sichtbarkeit automatisch mit. Ein manueller Statuswechsel überschreibt das zusätzlich.</div>
+              </div>
+            </div>
+          </article>
+        </section>
+      ) : null}
 
       <section className="grid-2">
         <article className="card">
           <div className="card-body-lg stack-md">
             <h2 className="heading-lg">Neue Abstimmungsrunde anlegen</h2>
-            <p className="muted small">
-              Format für die Songliste: pro Zeile <strong>Songtitel – Interpret</strong>. Sobald du speicherst, wird diese Runde aktiv gesetzt.
-            </p>
-
-            {status ? <div className={`alert ${status.type}`}>{status.text}</div> : null}
-
+            <p className="muted small">Format für die Songliste: pro Zeile <strong>Songtitel – Interpret</strong>. Neue Runden werden automatisch zur aktuellen Runde.</p>
             <form className="stack-md" onSubmit={handleCreatePoll}>
               <label className="field">
                 <span className="label">Titel der Runde</span>
                 <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
               </label>
 
-              <div className="grid-2" style={{ gridTemplateColumns: '1fr 220px' }}>
+              <div className="grid-2 form-grid-mixed">
                 <label className="field">
                   <span className="label">Slug / URL-Kürzel</span>
                   <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} required />
@@ -169,14 +301,32 @@ Schnaps an der Theke – DC#Mark`);
                 <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
               </label>
 
+              <div className="grid-3 compact-grid">
+                <label className="field">
+                  <span className="label">Status</span>
+                  <select className="select" value={newStatus} onChange={(e) => setNewStatus(e.target.value as PollStatus)}>
+                    <option value="draft">Entwurf</option>
+                    <option value="scheduled">Geplant</option>
+                    <option value="live">Live</option>
+                    <option value="ended">Beendet</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="label">Start</span>
+                  <input className="input" type="datetime-local" value={newStartsAt} onChange={(e) => setNewStartsAt(e.target.value)} />
+                </label>
+                <label className="field">
+                  <span className="label">Ende</span>
+                  <input className="input" type="datetime-local" value={newEndsAt} onChange={(e) => setNewEndsAt(e.target.value)} />
+                </label>
+              </div>
+
               <label className="field">
                 <span className="label">Songliste</span>
                 <textarea className="textarea" value={songsText} onChange={(e) => setSongsText(e.target.value)} required />
               </label>
 
-              <button className="button" type="submit" disabled={saving}>
-                {saving ? 'Speichert ...' : 'Runde aktivieren'}
-              </button>
+              <button className="button" type="submit" disabled={saving}>{saving ? 'Speichert ...' : 'Neue Runde anlegen'}</button>
             </form>
           </div>
         </article>
@@ -189,19 +339,19 @@ Schnaps an der Theke – DC#Mark`);
                 <thead>
                   <tr>
                     <th>Titel</th>
-                    <th>Slug</th>
-                    <th>Plätze</th>
                     <th>Status</th>
+                    <th>Start</th>
+                    <th>Ende</th>
                     <th>Erstellt</th>
                   </tr>
                 </thead>
                 <tbody>
                   {overview.recentPolls.map((poll) => (
                     <tr key={poll.id}>
-                      <td>{poll.title}</td>
-                      <td>{poll.slug}</td>
-                      <td>{poll.rankingSize}</td>
-                      <td>{poll.isActive ? 'aktiv' : 'archiv'}</td>
+                      <td>{poll.title}<div className="small muted">{poll.slug}</div></td>
+                      <td>{pollStatusLabel(poll.resolvedStatus)}</td>
+                      <td>{poll.startsAt ? formatDateTime(poll.startsAt) : '—'}</td>
+                      <td>{poll.endsAt ? formatDateTime(poll.endsAt) : '—'}</td>
                       <td>{formatDateTime(poll.createdAt)}</td>
                     </tr>
                   ))}
@@ -215,12 +365,12 @@ Schnaps an der Theke – DC#Mark`);
       <section className="card">
         <div className="card-body-lg stack-md">
           <div className="toolbar">
-            <h2 className="heading-lg">Ergebnisse der aktiven Runde</h2>
+            <h2 className="heading-lg">Ergebnisse der aktuellen Runde</h2>
             {overview.activePoll ? <span className="badge">{overview.activePoll.slug}</span> : null}
           </div>
 
           {!overview.activePoll ? (
-            <div className="empty-state"><div>Es gibt noch keine aktive Runde.</div></div>
+            <div className="empty-state"><div>Es gibt noch keine aktuelle Runde.</div></div>
           ) : (
             <div className="table-wrap">
               <table>
@@ -268,9 +418,7 @@ Schnaps an der Theke – DC#Mark`);
               </thead>
               <tbody>
                 {overview.recentVotes.length === 0 ? (
-                  <tr>
-                    <td colSpan={3}>Noch keine Stimmen vorhanden.</td>
-                  </tr>
+                  <tr><td colSpan={3}>Noch keine Stimmen vorhanden.</td></tr>
                 ) : (
                   overview.recentVotes.map((vote) => (
                     <tr key={`${vote.email}-${vote.submittedAt}`}>
