@@ -12,6 +12,20 @@ import {
   statusLabel,
 } from '@/lib/releaseVoting'
 
+function toInputDateTimeLocal(date = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const y = date.getFullYear()
+  const m = pad(date.getMonth() + 1)
+  const d = pad(date.getDate())
+  const h = pad(date.getHours())
+  const min = pad(date.getMinutes())
+  return `${y}-${m}-${d}T${h}:${min}`
+}
+
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000)
+}
+
 export default async function ReleaseVotingAdminPage({
   searchParams,
 }: {
@@ -26,92 +40,87 @@ export default async function ReleaseVotingAdminPage({
 
     const supabase = getSupabaseAdmin()
 
-    try {
-      const title = String(formData.get('title') ?? '').trim()
-      const slugInput = String(formData.get('slug') ?? '').trim()
-      const description = String(formData.get('description') ?? '').trim()
-      const status = String(formData.get('status') ?? 'live').trim() as 'draft' | 'live' | 'ended'
-      const startAt = String(formData.get('start_at') ?? '').trim()
-      const endAt = String(formData.get('end_at') ?? '').trim()
-      const placesCount = Number(formData.get('places_count') ?? 12)
-      const songlistRaw = String(formData.get('songlist') ?? '')
+    const title = String(formData.get('title') ?? '').trim()
+    const slugInput = String(formData.get('slug') ?? '').trim()
+    const description = String(formData.get('description') ?? '').trim()
+    const status = String(formData.get('status') ?? 'live').trim() as 'draft' | 'live' | 'ended'
+    const startAt = String(formData.get('start_at') ?? '').trim()
+    const endAt = String(formData.get('end_at') ?? '').trim()
+    const placesCount = Number(formData.get('places_count') ?? 12)
+    const songlistRaw = String(formData.get('songlist') ?? '')
 
-      const slug = normalizeSlug(slugInput || title)
-      const songs = parseSonglist(songlistRaw)
+    const slug = normalizeSlug(slugInput || title)
+    const songs = parseSonglist(songlistRaw)
 
-      if (!title) redirect('/admin/release-voting?error=Bitte%20einen%20Titel%20eingeben.')
-      if (!slug) redirect('/admin/release-voting?error=Bitte%20einen%20gültigen%20Slug%20eingeben.')
-      if (!startAt || !endAt) redirect('/admin/release-voting?error=Bitte%20Start%20und%20Ende%20ausfüllen.')
-      if (new Date(startAt).getTime() >= new Date(endAt).getTime()) {
-        redirect('/admin/release-voting?error=Das%20Ende%20muss%20nach%20dem%20Start%20liegen.')
-      }
-      if (!Number.isInteger(placesCount) || placesCount < 1 || placesCount > 50) {
-        redirect('/admin/release-voting?error=Die%20Platzanzahl%20muss%20zwischen%201%20und%2050%20liegen.')
-      }
-      if (songs.length === 0) redirect('/admin/release-voting?error=Bitte%20mindestens%20einen%20Song%20eintragen.')
-      if (songs.length < placesCount) {
-        redirect(
-          `/admin/release-voting?error=${encodeURIComponent(
-            `Es sind nur ${songs.length} Songs eingetragen, aber ${placesCount} Plätze ausgewählt.`,
-          )}`,
-        )
-      }
-
-      const { data: slugExists, error: slugCheckError } = await supabase
-        .from('release_voting_rounds')
-        .select('id')
-        .eq('slug', slug)
-        .maybeSingle()
-
-      if (slugCheckError) {
-        redirect(`/admin/release-voting?error=${encodeURIComponent(slugCheckError.message)}`)
-      }
-
-      if (slugExists) {
-        redirect(
-          `/admin/release-voting?error=${encodeURIComponent(
-            'Dieser Slug existiert schon. Bitte ein anderes URL-Kürzel verwenden.',
-          )}`,
-        )
-      }
-
-      if (status === 'live') {
-        const { error: unsetCurrentError } = await supabase
-          .from('release_voting_rounds')
-          .update({ is_current: false })
-          .eq('is_current', true)
-
-        if (unsetCurrentError) {
-          redirect(`/admin/release-voting?error=${encodeURIComponent(unsetCurrentError.message)}`)
-        }
-      }
-
-      const payload = {
-        title,
-        slug,
-        description: description || null,
-        status,
-        start_at: startAt,
-        end_at: endAt,
-        places_count: placesCount,
-        is_current: status === 'live',
-        songs_json: songs,
-        ended_at: status === 'ended' ? new Date().toISOString() : null,
-      }
-
-      const { error: insertError } = await supabase.from('release_voting_rounds').insert(payload)
-
-      if (insertError) {
-        redirect(`/admin/release-voting?error=${encodeURIComponent(insertError.message)}`)
-      }
-
-      revalidatePath('/admin/release-voting')
-      revalidatePath('/release-voting')
-      redirect('/admin/release-voting?ok=created')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unbekannter Fehler beim Anlegen.'
-      redirect(`/admin/release-voting?error=${encodeURIComponent(message)}`)
+    if (!title) redirect('/admin/release-voting?error=Bitte%20einen%20Titel%20eingeben.')
+    if (!slug) redirect('/admin/release-voting?error=Bitte%20einen%20gültigen%20Slug%20eingeben.')
+    if (!startAt || !endAt) redirect('/admin/release-voting?error=Bitte%20Start%20und%20Ende%20ausfüllen.')
+    if (new Date(startAt).getTime() >= new Date(endAt).getTime()) {
+      redirect('/admin/release-voting?error=Das%20Ende%20muss%20nach%20dem%20Start%20liegen.')
     }
+    if (!Number.isInteger(placesCount) || placesCount < 1 || placesCount > 50) {
+      redirect('/admin/release-voting?error=Die%20Platzanzahl%20muss%20zwischen%201%20und%2050%20liegen.')
+    }
+    if (songs.length === 0) redirect('/admin/release-voting?error=Bitte%20mindestens%20einen%20Song%20eintragen.')
+    if (songs.length < placesCount) {
+      redirect(
+        `/admin/release-voting?error=${encodeURIComponent(
+          `Es sind nur ${songs.length} Songs eingetragen, aber ${placesCount} Plätze ausgewählt.`,
+        )}`,
+      )
+    }
+
+    const { data: slugExists, error: slugCheckError } = await supabase
+      .from('release_voting_rounds')
+      .select('id')
+      .eq('slug', slug)
+      .maybeSingle()
+
+    if (slugCheckError) {
+      redirect(`/admin/release-voting?error=${encodeURIComponent(slugCheckError.message)}`)
+    }
+
+    if (slugExists) {
+      redirect(
+        `/admin/release-voting?error=${encodeURIComponent(
+          'Dieser Slug existiert schon. Bitte ein anderes URL-Kürzel verwenden.',
+        )}`,
+      )
+    }
+
+    if (status === 'live') {
+      const { error: unsetCurrentError } = await supabase
+        .from('release_voting_rounds')
+        .update({ is_current: false })
+        .eq('is_current', true)
+
+      if (unsetCurrentError) {
+        redirect(`/admin/release-voting?error=${encodeURIComponent(unsetCurrentError.message)}`)
+      }
+    }
+
+    const payload = {
+      title,
+      slug,
+      description: description || null,
+      status,
+      start_at: startAt,
+      end_at: endAt,
+      places_count: placesCount,
+      is_current: status === 'live',
+      songs_json: songs,
+      ended_at: status === 'ended' ? new Date().toISOString() : null,
+    }
+
+    const { error: insertError } = await supabase.from('release_voting_rounds').insert(payload)
+
+    if (insertError) {
+      redirect(`/admin/release-voting?error=${encodeURIComponent(insertError.message)}`)
+    }
+
+    revalidatePath('/admin/release-voting')
+    revalidatePath('/release-voting')
+    redirect('/admin/release-voting?ok=created')
   }
 
   async function endRoundAction(formData: FormData) {
@@ -149,7 +158,7 @@ export default async function ReleaseVotingAdminPage({
   if (currentRoundError) {
     return (
       <main className="min-h-screen bg-zinc-50 p-6 md:p-10">
-        <div className="mx-auto max-w-7xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-800">
+        <div className="mx-auto max-w-6xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-800">
           Fehler beim Laden der Runden: {currentRoundError.message}
         </div>
       </main>
@@ -179,13 +188,22 @@ export default async function ReleaseVotingAdminPage({
 
   const currentSongs = Array.isArray(currentRound?.songs_json) ? currentRound.songs_json : []
   const results = currentRound ? buildResults(currentSongs, currentVotes) : []
+  const now = new Date()
+  const defaultStart = toInputDateTimeLocal(now)
+  const defaultEnd = toInputDateTimeLocal(addHours(now, 12))
 
   return (
     <main className="min-h-screen bg-zinc-50 p-6 md:p-10">
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6">
         <div>
-          <div className="text-sm font-medium text-zinc-500">Admin</div>
-          <h1 className="mt-1 text-4xl font-bold tracking-tight text-zinc-900">Release-Voting verwalten</h1>
+          <div className="inline-flex rounded-full bg-zinc-100 px-4 py-1 text-sm font-medium text-zinc-600">
+            Admin
+          </div>
+          <h1 className="mt-3 text-4xl font-bold tracking-tight text-zinc-900">Release-Voting verwalten</h1>
+          <p className="mt-3 text-zinc-600">
+            Diese Seite steuert genau dieselbe Datenbasis wie die öffentliche Voting-Seite. Wenn du eine Runde als Live anlegst,
+            ist sie sofort die aktuelle Runde. Ob sie öffentlich schon als "live" sichtbar ist, hängt zusätzlich von Start und Ende ab.
+          </p>
         </div>
 
         {ok === 'created' && (
@@ -225,9 +243,13 @@ export default async function ReleaseVotingAdminPage({
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.5fr,1fr]">
+        <section className="grid gap-6 xl:grid-cols-[1.35fr,1fr]">
           <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
             <h2 className="text-2xl font-semibold text-zinc-900">Neue Runde anlegen</h2>
+            <p className="mt-2 text-sm text-zinc-500">
+              Songliste: pro Zeile <strong>Songtitel – Interpret</strong>. Wenn du willst, dass die Runde sofort öffentlich live ist,
+              muss die Startzeit auf jetzt oder früher stehen.
+            </p>
             <form action={createRoundAction} className="mt-6 space-y-5">
               <div>
                 <label className="mb-2 block text-sm font-medium text-zinc-700">Titel</label>
@@ -291,6 +313,7 @@ export default async function ReleaseVotingAdminPage({
                     name="start_at"
                     type="datetime-local"
                     required
+                    defaultValue={defaultStart}
                     className="w-full rounded-2xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-900"
                   />
                 </div>
@@ -300,6 +323,7 @@ export default async function ReleaseVotingAdminPage({
                     name="end_at"
                     type="datetime-local"
                     required
+                    defaultValue={defaultEnd}
                     className="w-full rounded-2xl border border-zinc-300 px-4 py-3 outline-none focus:border-zinc-900"
                   />
                 </div>
@@ -316,7 +340,10 @@ export default async function ReleaseVotingAdminPage({
                 />
               </div>
 
-              <button type="submit" className="inline-flex w-full items-center justify-center rounded-2xl bg-zinc-950 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800">
+              <button
+                type="submit"
+                className="inline-flex w-full items-center justify-center rounded-2xl bg-zinc-950 px-5 py-3 font-semibold text-white transition hover:bg-zinc-800"
+              >
                 Neue Runde anlegen
               </button>
             </form>
@@ -335,6 +362,13 @@ export default async function ReleaseVotingAdminPage({
                     </tr>
                   </thead>
                   <tbody>
+                    {lastRounds.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="py-4 text-zinc-500">
+                          Noch keine Runden vorhanden.
+                        </td>
+                      </tr>
+                    )}
                     {lastRounds.map((round) => (
                       <tr key={round.id} className="border-b border-zinc-100 align-top">
                         <td className="py-4 pr-4">
@@ -352,48 +386,60 @@ export default async function ReleaseVotingAdminPage({
                   </tbody>
                 </table>
               </div>
-
-              {currentRound && (
-                <form action={endRoundAction} className="mt-6">
-                  <input type="hidden" name="round_id" value={currentRound.id} />
-                  <button type="submit" className="inline-flex w-full items-center justify-center rounded-2xl border border-zinc-300 px-5 py-3 font-semibold text-zinc-900 transition hover:bg-zinc-50">
-                    Aktuelle Runde beenden
-                  </button>
-                </form>
-              )}
             </div>
+
+            {currentRound && (
+              <form action={endRoundAction} className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="text-sm text-zinc-500">Aktuell aktiv</div>
+                <div className="mt-1 text-xl font-semibold text-zinc-900">{currentRound.title}</div>
+                <div className="mt-2 text-sm text-zinc-500">
+                  Start: {formatDateTime(currentRound.start_at)} · Ende: {formatDateTime(currentRound.end_at)}
+                </div>
+                <input type="hidden" name="round_id" value={currentRound.id} />
+                <button
+                  type="submit"
+                  className="mt-5 inline-flex w-full items-center justify-center rounded-2xl border border-zinc-300 px-5 py-3 font-semibold text-zinc-900 transition hover:bg-zinc-50"
+                >
+                  Aktuelle Runde beenden
+                </button>
+              </form>
+            )}
           </div>
         </section>
 
         <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
           <h2 className="text-2xl font-semibold text-zinc-900">Live-Ranking</h2>
-          {!currentRound && <div className="mt-6 text-zinc-500">Es gibt noch keine aktuelle Runde.</div>}
-          {currentRound && (
-            <div className="mt-6 overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 text-zinc-500">
+          <div className="mt-6 overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-zinc-200 text-zinc-500">
+                <tr>
+                  <th className="pb-3 pr-4 font-medium">#</th>
+                  <th className="pb-3 pr-4 font-medium">Song</th>
+                  <th className="pb-3 pr-4 font-medium">Ø Punkte</th>
+                  <th className="pb-3 pr-4 font-medium">Gesamt</th>
+                  <th className="pb-3 pr-4 font-medium">Wertungen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.length === 0 && (
                   <tr>
-                    <th className="pb-3 pr-4 font-medium">#</th>
-                    <th className="pb-3 pr-4 font-medium">Song</th>
-                    <th className="pb-3 pr-4 font-medium">Ø Punkte</th>
-                    <th className="pb-3 pr-4 font-medium">Gesamt</th>
-                    <th className="pb-3 pr-4 font-medium">Wertungen</th>
+                    <td colSpan={5} className="py-4 text-zinc-500">
+                      Noch keine Ergebnisse vorhanden.
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {results.map((row) => (
-                    <tr key={row.song} className="border-b border-zinc-100 align-top">
-                      <td className="py-4 pr-4 font-semibold text-zinc-900">{row.rank}</td>
-                      <td className="py-4 pr-4 text-zinc-900">{row.song}</td>
-                      <td className="py-4 pr-4 text-zinc-700">{row.averagePoints.toFixed(2)}</td>
-                      <td className="py-4 pr-4 text-zinc-700">{row.totalPoints}</td>
-                      <td className="py-4 pr-4 text-zinc-700">{row.voteCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                )}
+                {results.map((row) => (
+                  <tr key={row.song} className="border-b border-zinc-100 align-top">
+                    <td className="py-4 pr-4 font-semibold text-zinc-900">{row.rank}</td>
+                    <td className="py-4 pr-4 text-zinc-900">{row.song}</td>
+                    <td className="py-4 pr-4 text-zinc-700">{row.averagePoints.toFixed(2)}</td>
+                    <td className="py-4 pr-4 text-zinc-700">{row.totalPoints}</td>
+                    <td className="py-4 pr-4 text-zinc-700">{row.voteCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
     </main>
