@@ -3,7 +3,7 @@ import PublicVotingForm from "@/components/release-voting/PublicVotingForm";
 import {
   buildResults,
   formatDateTime,
-  getCurrentRound,
+  getRoundBySlug,
   getVotesForRound,
   statusClass,
   statusLabel,
@@ -12,17 +12,30 @@ import {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function ReleaseVotingPage() {
-  const round = await getCurrentRound();
+export default async function ReleaseVotingSlugPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const round = await getRoundBySlug(slug);
 
   if (!round) {
     return (
       <main className="min-h-screen bg-zinc-100 px-4 py-8 md:px-8">
         <div className="mx-auto max-w-6xl rounded-[32px] border border-zinc-200 bg-white p-8 shadow-sm">
           <h1 className="text-4xl font-bold tracking-tight text-zinc-950">
-            Release-Voting
+            Umfrage nicht gefunden
           </h1>
-          <p className="mt-4 text-zinc-600">Aktuell ist keine Umfrage verfügbar.</p>
+          <p className="mt-4 text-zinc-600">
+            Für diesen Link wurde keine Runde gefunden.
+          </p>
+          <Link
+            href="/release-voting"
+            className="mt-6 inline-flex rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100"
+          >
+            Zur aktuellen Umfrage
+          </Link>
         </div>
       </main>
     );
@@ -36,10 +49,10 @@ export default async function ReleaseVotingPage() {
     <main className="min-h-screen bg-zinc-100 px-4 py-8 md:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
-          <div className="grid gap-6 md:grid-cols-[1.4fr,1fr]">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="inline-flex rounded-full bg-zinc-100 px-4 py-1 text-sm font-medium text-zinc-700">
-                Publikums-Voting
+                Einzelne Umfrage
               </div>
               <h1 className="mt-4 text-4xl font-bold tracking-tight text-zinc-950 md:text-5xl">
                 {round.title}
@@ -47,7 +60,6 @@ export default async function ReleaseVotingPage() {
               {round.description && (
                 <p className="mt-4 max-w-3xl text-lg text-zinc-600">{round.description}</p>
               )}
-
               <div className="mt-6 flex flex-wrap gap-3">
                 <span className={`inline-flex rounded-full border px-4 py-2 text-sm font-medium ${statusClass(round.status)}`}>
                   Status: {statusLabel(round.status)}
@@ -62,22 +74,16 @@ export default async function ReleaseVotingPage() {
             </div>
 
             <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
-              <div className="text-sm text-zinc-500">Direkter Link</div>
-              <div className="mt-2 break-all text-sm font-medium text-zinc-800">
-                /release-voting/{round.slug}
-              </div>
-
-              <div className="mt-6 text-sm text-zinc-500">Aktuelle Stimmen</div>
+              <div className="text-sm text-zinc-500">Slug</div>
+              <div className="mt-1 text-sm font-semibold text-zinc-900">{round.slug}</div>
+              <div className="mt-4 text-sm text-zinc-500">Stimmen</div>
               <div className="mt-1 text-3xl font-bold text-zinc-950">{votes.length}</div>
 
-              <div className="mt-6 text-sm text-zinc-500">Songs in der Runde</div>
-              <div className="mt-1 text-3xl font-bold text-zinc-950">{songs.length}</div>
-
               <Link
-                href="/admin/release-voting"
+                href="/release-voting"
                 className="mt-6 inline-flex rounded-2xl border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100"
               >
-                Zum Admin
+                Zur aktuellen Umfrage
               </Link>
             </div>
           </div>
@@ -103,7 +109,7 @@ export default async function ReleaseVotingPage() {
 
         <section className="rounded-[32px] border border-zinc-200 bg-white p-6 shadow-sm md:p-8">
           <h2 className="text-2xl font-semibold tracking-tight text-zinc-950">
-            Aktuelles Ranking
+            Ranking
           </h2>
 
           <div className="mt-6 overflow-x-auto">
